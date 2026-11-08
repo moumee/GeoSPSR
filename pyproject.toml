@@ -26,3 +26,22 @@ classifiers = [
 
 [tool.setuptools]
 package-dir = {"geospsr" = "geospsr"}
+
+[tool.uv]
+exclude-newer = "2025-05-19T00:00:00Z"
+
+[tool.uv.sources]
+meshplot = { git = "https://github.com/skoch9/meshplot" }
+
+[dependency-groups]
+dev = [
+    "gpytoolbox>=0.3.3",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
+    "jupyter>=1.1.1",
+    "jupytext>=1.17.1",
+    "libigl>=2.6.1",
+    "matplotlib>=3.9.4",
+    "meshplot",
+    "pythreejs>=2.4.2",
+]

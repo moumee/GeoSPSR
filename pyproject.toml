@@ -29,6 +29,8 @@ package-dir = {"geospsr" = "geospsr"}
 
 [tool.uv]
 exclude-newer = "2025-05-19T00:00:00Z"
+default-groups = ["dev", "gpu"]
+required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.uv.sources]
 meshplot = { git = "https://github.com/skoch9/meshplot" }
@@ -48,4 +50,8 @@ dev = [
     "pybind11-stubgen>=2.5.4",
     "pyprojroot>=0.3.0",
     "pythreejs>=2.4.2",
+]
+
+gpu = [
+    "jax[cuda12] ; sys_platform == 'linux'",
 ]

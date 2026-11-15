@@ -95,6 +95,48 @@ def evaluate_karhunen_loeve_kernel(x_diff, eigenvectors, eigenvalues):
     return ((eigenvalues**2) * jnp.cos(dot)).sum()
 
 
+def _noisy_kernel_cholesky(x_data, kernel_v, sigma):
+    """
+    Lower Cholesky factor L of K_vv(x_data, x_data) + sigma^2 I, where sigma is
+    the observation noise std of v. Solve with cho_solve((L, True), rhs).
+
+    x_data: (nd, d)
+
+    returns: (nd, nd)
+
+    [MODIFIED from upstream GeoSPSR] Upstream inlined this in compute_mean,
+    compute_variance, compute_covariance and sample_pathwise_conditioning as
+        kv_dd = (
+            vmap(vmap(kernel_v, (None, 0)), (0, None))(x_data, x_data)
+            + jnp.eye(x_data.shape[0]) * sigma
+        )
+        jax.scipy.linalg.solve(kv_dd, rhs, assume_a="pos")
+    Three changes:
+    1. sigma -> sigma**2: the SDD solver (sdd.py) adds sigma**2 * I, so the
+       Cholesky and SDD paths were solving different systems (50x apart for
+       sigma = 0.02). Unified to the GP convention sigma**2 (sigma = noise std).
+    2. Wrapped in jit: built eagerly, every elementwise op of the kernel
+       allocates its own (nd, nd) temporary (peak ~7x the matrix; OOM at
+       nd = 24k on a 12 GB GPU). jit lets XLA fuse them into one kernel.
+    3. Factorize once, inside the same jit, and keep only L: upstream kept
+       kv_dd alive while solve() made its own copies (peak ~3x the matrix, OOM
+       for nd = 24k when run after other jobs), and re-factorized kv_dd for
+       every query batch in compute_variance / compute_covariance.
+    """
+
+    @jit
+    def build(x):
+        kv_dd = (
+            vmap(vmap(kernel_v, (None, 0)), (0, None))(x, x)
+            + jnp.eye(x.shape[0]) * sigma**2
+        )
+        # kv_dd is exactly symmetric (kernels depend on |x1 - x2|), so skip the
+        # (kv_dd + kv_dd^T) / 2 that jnp.linalg.cholesky does: one fewer (nd, nd) buffer
+        return jax.lax.linalg.cholesky(kv_dd, symmetrize_input=False)
+
+    return build(x_data)
+
+
 def compute_mean(
     x_query,
     x_data,
@@ -118,11 +160,10 @@ def compute_mean(
     returns: (nq,)
     """
     if not sdd_params:
-        kv_dd = (
-            vmap(vmap(kernel_v, (None, 0)), (0, None))(x_data, x_data)
-            + jnp.eye(x_data.shape[0]) * sigma
-        )
-        alpha = jax.scipy.linalg.solve(kv_dd, v_data, assume_a="pos")
+        # [MODIFIED] upstream: eager kernel matrix + sigma * I, then solve()
+        # (see _noisy_kernel_cholesky)
+        chol = _noisy_kernel_cholesky(x_data, kernel_v, sigma)
+        alpha = jax.scipy.linalg.cho_solve((chol, True), v_data)
     else:
         alpha = sdd_solve(x_data, v_data, kernel_v, sigma, **sdd_params)
 
@@ -161,13 +202,12 @@ def compute_variance(
     returns: (nq, nq)
     """
     if not sdd_params:
-        kv_dd = (
-            vmap(vmap(kernel_v, (None, 0)), (0, None))(x_data, x_data)
-            + jnp.eye(x_data.shape[0]) * sigma
-        )
+        # [MODIFIED] upstream: eager kernel matrix + sigma * I, then solve()
+        # (see _noisy_kernel_cholesky)
+        chol = _noisy_kernel_cholesky(x_data, kernel_v, sigma)
 
         def solver(row):
-            return jax.scipy.linalg.solve(kv_dd, row, assume_a="pos")
+            return jax.scipy.linalg.cho_solve((chol, True), row)
     else:
 
         def solver(row):
@@ -208,13 +248,12 @@ def compute_covariance(
     returns: (nq, nq)
     """
     if not sdd_params:
-        kv_dd = (
-            vmap(vmap(kernel_v, (None, 0)), (0, None))(x_data, x_data)
-            + jnp.eye(x_data.shape[0]) * sigma
-        )
+        # [MODIFIED] upstream: eager kernel matrix + sigma * I, then solve()
+        # (see _noisy_kernel_cholesky)
+        chol = _noisy_kernel_cholesky(x_data, kernel_v, sigma)
 
         def solver(row):
-            return jax.scipy.linalg.solve(kv_dd, row, assume_a="pos")
+            return jax.scipy.linalg.cho_solve((chol, True), row)
     else:
 
         def solver(row):
@@ -284,13 +323,12 @@ def sample_pathwise_conditioning(
     v_residual = v_data - v_prior
 
     if not sdd_params:
-        kv_dd = (
-            vmap(vmap(kernel_v, (None, 0)), (0, None))(x_data, x_data)
-            + jnp.eye(x_data.shape[0]) * sigma
-        )
+        # [MODIFIED] upstream: eager kernel matrix + sigma * I, then solve()
+        # (see _noisy_kernel_cholesky)
+        chol = _noisy_kernel_cholesky(x_data, kernel_v, sigma)
 
         def solver(row):
-            return jax.scipy.linalg.solve(kv_dd, row, assume_a="pos")
+            return jax.scipy.linalg.cho_solve((chol, True), row)
     else:
 
         def solver(row):

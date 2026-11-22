@@ -16,6 +16,7 @@ dependencies = [
     "jax",
     "flax",
     "tqdm",
+    "polyscope>=2.4.0",
 ]
 
 classifiers = [
@@ -29,11 +30,29 @@ package-dir = {"geospsr" = "geospsr"}
 
 [tool.uv]
 exclude-newer = "2025-05-19T00:00:00Z"
-default-groups = ["dev", "gpu"]
+# torch 2.8 (cuDNN 9.10) is needed to coexist with jax 0.6's cuDNN>=9.8 requirement;
+# torch 2.7 would force jax down to 0.5.3.
+exclude-newer-package = { torch = "2026-01-01T00:00:00Z", triton = "2026-01-01T00:00:00Z", nvidia-cudnn-cu12 = "2026-01-01T00:00:00Z", nvidia-nccl-cu12 = "2026-01-01T00:00:00Z" }
+default-groups = ["dev", "gpu", "wnnc"]
 required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# wn-treecode's setup.py imports torch, so build it against the venv's torch
+no-build-isolation-package = ["wn-treecode"]
+
+# Static metadata so `uv lock` doesn't have to run setup.py (which needs torch)
+[[tool.uv.dependency-metadata]]
+name = "wn-treecode"
+version = "0.0.1"
+requires-dist = []
 
 [tool.uv.sources]
 meshplot = { git = "https://github.com/skoch9/meshplot" }
+torch = { index = "pytorch-cu128" }
+wn-treecode = { path = "third_party/WNNC/ext", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -46,7 +65,7 @@ dev = [
     "libigl<2.5.4",
     "matplotlib>=3.9.4",
     "meshplot",
-    "open3d>=0.19.0",
+    "open3d>=0.19.0 ; python_full_version < '3.13'",  # no cp313 wheels before exclude-newer cutoff
     "pybind11-stubgen>=2.5.4",
     "pyprojroot>=0.3.0",
     "pythreejs>=2.4.2",
@@ -54,4 +73,12 @@ dev = [
 
 gpu = [
     "jax[cuda12] ; sys_platform == 'linux'",
+]
+
+# WNNC normal estimation (third_party/WNNC submodule). Needs nvcc to build.
+wnnc = [
+    "torch==2.8.0",
+    "psutil",
+    "trimesh",
+    "wn-treecode",
 ]

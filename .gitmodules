@@ -1,3 +1,6 @@
 [submodule "third_party/WNNC"]
 	path = third_party/WNNC
 	url = https://github.com/jsnln/WNNC
+[submodule "third_party/dse-meshing"]
+	path = third_party/dse-meshing
+	url = https://github.com/mrakotosaon/dse-meshing
